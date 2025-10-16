@@ -17,8 +17,8 @@ export class BinaryHeap<T> {
         if (this.size === 0) return undefined;
 
         const top = this.heap[0]
-
         const last = this.heap.pop()!
+
         if (this.size > 0) {
             this.heap[0] = last
             this.heapifyDown()
@@ -37,8 +37,10 @@ export class BinaryHeap<T> {
     }
 
     private heapifyUp(index: number = this.size - 1) {
-        while (this.hasParent(index) && this.comparator(this.heap[index], this.getParent(index)) < 0) {
+        while (index > 0) {
             const parentIndex = this.getParentIndex(index);
+            if (this.comparator(this.heap[index], this.heap[parentIndex]) >= 0) break;
+
             this.swap(index, parentIndex);
             index = parentIndex;
         }
@@ -70,24 +72,12 @@ export class BinaryHeap<T> {
         [this.heap[i], this.heap[j]] = [this.heap[j], this.heap[i]];
     }
 
-    private hasParent(index: number) {
-        return this.getParentIndex(index) >= 0
-    }
-
-    private getParent(index: number) {
-        return this.heap[this.getParentIndex(index)];
-    }
-
     private getParentIndex(index: number) {
-        return index - 1 >> 1;
+        return (index - 1) >> 1;
     }
 
     private hasLeftChild(index: number) {
         return this.getLeftChildIndex(index) < this.size;
-    }
-
-    private getLeftChild(index: number) {
-        return this.heap[this.getLeftChildIndex(index)];
     }
 
     private getLeftChildIndex(index: number) {
