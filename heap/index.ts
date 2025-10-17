@@ -144,15 +144,14 @@ export class FibonacciHeap<T> {
 
 }
 
-export class PairingHeapNode<T> {
+export class PairNode<K, V> {
     public constructor(
-        public weight: number,
-        public value: T,
-        public child: PairingHeapNode<T> | null = null,
-        public sibling: PairingHeapNode<T> | null = null
+        public key: K,
+        public value: V,
+        public child?: PairNode<K, V>,
+        public sibling?: PairNode<K, V>
     ) { }
 }
 
 export class PairingHeap<T> {
-    private root: PairingHeapNode<T> | null = null;
 }
