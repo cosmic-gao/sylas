@@ -144,17 +144,20 @@ export class FibonacciHeap<T> {
 
 }
 
+export type Nullable<T> = T | null;
+
+export type NullableNode<T> = Nullable<PairingNode<T>>;
+
 export interface PairingNode<T> {
     value: T;
-    next?: PairingNode<T>;  // 兄弟指针
-    prev?: PairingNode<T>;  // collapse 用
-    child?: PairingNode<T>; // 子堆指针
+    child: NullableNode<T>;
+    next: NullableNode<T>;
+    prev: NullableNode<T>;
 }
 
 export class PairingHeap<T> {
-    private _size = 0;
-
-    private root: PairingNode<T> | null = null;
+    private _size: number = 0;
+    private root: NullableNode<T> = null;
 
     public get size(): number {
         return this._size;
@@ -162,10 +165,9 @@ export class PairingHeap<T> {
 
     public constructor(protected readonly comparator: Comparator<T>) { }
 
-
-    public insert(value: T): PairingNode<T> {
-        const node: PairingNode<T> = { value };
-        this.root = this.meld(this.root!, node);
+    public push(value: T): PairingNode<T> {
+        const node: PairingNode<T> = { value, child: null, next: null, prev: null };
+        this.root = this.meld(this.root, node);
         this._size++;
         return node;
     }
@@ -176,6 +178,49 @@ export class PairingHeap<T> {
 
     public poll(): T | undefined {
         if (!this.root) return undefined
+
+        const topValue = this.root.value;
+        this.root = this.collapse(this.root.child);
+        if (this.root) this.root.prev = null;
+        this._size--;
+        return topValue
+    }
+
+    public delete(node: PairingNode<T>): boolean {
+        if (!node) return false;
+
+        if (node === this.root) {
+            this.poll();
+            return true;
+        }
+
+        this.detach(node);
+
+        const merged = this.collapse(node.child);
+        if (merged) merged.prev = null;
+
+        // 把合并后的子树重新与根合并
+        this.root = this.meld(this.root, merged);
+        this._size--;
+        return true
+    }
+
+    public update(node: PairingNode<T>, value: T): void {
+        const cmp = this.comparator(value, node.value);
+        node.value = value;
+
+        if (cmp < 0) {
+            // 新值更小 => 向上提升
+            if (node !== this.root) {
+                this.detach(node);
+                this.root = this.meld(this.root, node);
+            }
+        } else if (cmp > 0) {
+            // 新值更大 => 可能要下降
+            // 简化实现：删除后重新插入
+            this.delete(node);
+            this.push(value);
+        }
     }
 
     public clear(): void {
@@ -183,38 +228,93 @@ export class PairingHeap<T> {
         this._size = 0;
     }
 
-    private meld(
-        a: PairingNode<T>,
-        b: PairingNode<T>
-    ): PairingNode<T> {
+    public empty(): boolean {
+        return this.size === 0 && this.root === null
+    }
+
+    private detach(node: PairingNode<T>) {
+        const prev = node.prev;
+        const next = node.next;
+
+        if (prev) {
+            if (prev.child === node) {
+                prev.child = next;
+            } else {
+                prev.next = next;
+            }
+        }
+        if (next) next.prev = prev;
+
+        node.prev = null;
+        node.next = null;
+    }
+
+    private meld(a: NullableNode<T>, b: NullableNode<T>): NullableNode<T> {
         if (!a) return b;
         if (!b) return a;
 
         if (this.comparator(a.value, b.value) > 0) {
-            b.next = a.child;
-            a.child = b;
-            return a;
+            b.prev = null;
+            a.prev = b;
+            a.next = b.child;
+            if (b.child) b.child.prev = a;
+            b.child = a;
+            return b;
         }
 
-        a.next = b.child;
-        b.child = a;
-        return b;
+        a.prev = null;
+        b.prev = a;
+        b.next = a.child;
+        if (a.child) a.child.prev = b;
+        a.child = b;
+        return a;
     }
 
-    private collapse(node: PairingNode<T>) {
+    private collapse(node: NullableNode<T>): NullableNode<T> {
         if (!node) return null;
 
-        let next: PairingNode<T> = node;
+        let tail: NullableNode<T> = null;
+        let a: PairingNode<T>;
+        let b: NullableNode<T>;
+        let next: NullableNode<T> = node;
+        let result: NullableNode<T> = null;
 
         while (next) {
-
+            a = next;
+            b = a.next;
+            if (b) {
+                next = b.next;
+                a.next = null;
+                b.next = null;
+                const merged = this.meld(a, b);
+                merged!.prev = tail;
+                tail = merged;
+            } else {
+                a.prev = tail;
+                tail = a;
+                break;
+            }
         }
+
+        // 逆向合并
+        while (tail) {
+            next = tail.prev;
+            tail.prev = null;
+            result = this.meld(result, tail);
+            tail = next;
+        }
+
+        return result;
     }
 }
 
 const heap = new PairingHeap<number>((a, b) => a - b);
-heap.insert(5);
-heap.insert(7);
-heap.insert(6);
+heap.push(5);
+heap.push(7);
+heap.push(6);
+heap.push(8);
 
+console.log(heap)
+
+heap.poll()
 console.log(heap)
