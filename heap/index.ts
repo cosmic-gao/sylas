@@ -144,14 +144,77 @@ export class FibonacciHeap<T> {
 
 }
 
-export class PairNode<K, V> {
-    public constructor(
-        public key: K,
-        public value: V,
-        public child?: PairNode<K, V>,
-        public sibling?: PairNode<K, V>
-    ) { }
+export interface PairingNode<T> {
+    value: T;
+    next?: PairingNode<T>;  // 兄弟指针
+    prev?: PairingNode<T>;  // collapse 用
+    child?: PairingNode<T>; // 子堆指针
 }
 
 export class PairingHeap<T> {
+    private _size = 0;
+
+    private root: PairingNode<T> | null = null;
+
+    public get size(): number {
+        return this._size;
+    }
+
+    public constructor(protected readonly comparator: Comparator<T>) { }
+
+
+    public insert(value: T): PairingNode<T> {
+        const node: PairingNode<T> = { value };
+        this.root = this.meld(this.root!, node);
+        this._size++;
+        return node;
+    }
+
+    public peek(): T | undefined {
+        return this.root?.value;
+    }
+
+    public poll(): T | undefined {
+        if (!this.root) return undefined
+    }
+
+    public clear(): void {
+        this.root = null;
+        this._size = 0;
+    }
+
+    private meld(
+        a: PairingNode<T>,
+        b: PairingNode<T>
+    ): PairingNode<T> {
+        if (!a) return b;
+        if (!b) return a;
+
+        if (this.comparator(a.value, b.value) > 0) {
+            b.next = a.child;
+            a.child = b;
+            return a;
+        }
+
+        a.next = b.child;
+        b.child = a;
+        return b;
+    }
+
+    private collapse(node: PairingNode<T>) {
+        if (!node) return null;
+
+        let next: PairingNode<T> = node;
+
+        while (next) {
+
+        }
+    }
 }
+
+const heap = new PairingHeap<number>((a, b) => a - b);
+heap.insert(5);
+heap.insert(7);
+heap.insert(6);
+
+console.log(heap)
