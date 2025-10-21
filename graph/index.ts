@@ -52,6 +52,7 @@ export class Graph<N extends Node = Node, E extends Edge = Edge> {
         this.order.push(node.id);
     }
 
+    //
     public addEdge(edge: E) {
         const { source, target } = edge;
 
