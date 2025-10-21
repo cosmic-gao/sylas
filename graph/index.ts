@@ -25,10 +25,10 @@ export class Graph<N extends Node = Node, E extends Edge = Edge> {
     private nodes: Map<NodeId, N> = new Map();
     private edges: Map<EdgeId, E> = new Map();
 
-    private incoming: Map<NodeId, Set<EdgeId>> = new Map();
-    private outgoing: Map<NodeId, Set<EdgeId>> = new Map();
+    private inEdges: Map<NodeId, Set<EdgeId>> = new Map();
+    private outEdges: Map<NodeId, Set<EdgeId>> = new Map();
 
-    private connections: WeakMap<N, Map<string, Set<EdgeId>>> = new WeakMap();
+    private endpointEdges: WeakMap<Endpoint, Set<Edge>> = new WeakMap();
 
     private neighbors: Map<NodeId, Set<NodeId>> = new Map();
 
@@ -36,19 +36,19 @@ export class Graph<N extends Node = Node, E extends Edge = Edge> {
 
     private order: NodeId[] = [];
 
-    private positions: Map<NodeId, number> = new Map();
+    private rank: Map<NodeId, number> = new Map();
 
     public addNode(node: N) {
         this.nodes.set(node.id, node);
 
-        this.incoming.set(node.id, new Set());
-        this.outgoing.set(node.id, new Set());
+        this.inEdges.set(node.id, new Set());
+        this.outEdges.set(node.id, new Set());
 
         this.neighbors.set(node.id, new Set());
 
         this.indegree.set(node.id, 0);
 
-        this.positions.set(node.id, this.order.length);
+        this.rank.set(node.id, this.order.length);
         this.order.push(node.id);
     }
 
@@ -57,15 +57,58 @@ export class Graph<N extends Node = Node, E extends Edge = Edge> {
 
         this.edges.set(edge.id, edge);
 
-        this.incoming.get(target.nodeId)!.add(edge.id);
-        this.outgoing.get(source.nodeId)!.add(edge.id);
+        this.inEdges.get(target.nodeId)!.add(edge.id);
+        this.outEdges.get(source.nodeId)!.add(edge.id);
 
         this.neighbors.get(edge.source.nodeId)!.add(edge.target.nodeId);
 
         this.indegree.set(target.nodeId, (this.indegree.get(target.nodeId) ?? 0) + 1);
+
+        this.linkEndpoint(source, edge);
+        this.linkEndpoint(target, edge);
+
+        this.reorder(source.nodeId, target.nodeId);
     }
 
-    private connect() { }
+    private linkEndpoint(endpoint: Endpoint, edge: Edge) {
+        let set = this.endpointEdges.get(endpoint);
+        if (!set) {
+            set = new Set();
+            this.endpointEdges.set(endpoint, set);
+        }
+        set.add(edge);
+    }
 
-    private disconnect() { }
+    private reorder(srcId: NodeId, tgtId: NodeId) {
+        const srcRank = this.rank.get(srcId);
+        const tgtRank = this.rank.get(tgtId);
+        if (srcRank === undefined || tgtRank === undefined) return;
+        if (srcRank < tgtRank) return;
+
+        const affected: NodeId[] = [];
+        const queue: NodeId[] = [tgtId];
+        const seen = new Set([tgtId]);
+
+        while (queue.length) {
+            const nodeId = queue.shift()!;
+            affected.push(nodeId)
+            for (const nxt of this.neighbors.get(nodeId) || []) {
+                const r = this.rank.get(nxt);
+                if (r !== undefined && r <= srcRank && !seen.has(nxt)) {
+                    seen.add(nxt);
+                    queue.push(nxt);
+                }
+            }
+        }
+
+        if (!affected.length) return;
+
+        const moved = new Set(affected);
+        const kept = this.order.filter(n => !moved.has(n));
+        const idx = kept.indexOf(srcId) + 1;
+        kept.splice(idx, 0, ...affected);
+
+        this.order = kept;
+        for (let i = 0; i < kept.length; i++) this.rank.set(kept[i], i);
+    }
 }

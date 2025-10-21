@@ -1,15 +1,18 @@
 type NodeId = string;
 type EdgeId = string;
 
-interface Node {
-  id: NodeId;
-  inputs: { name: string }[];
-  outputs: { name: string }[];
+interface Endpoint {
+  name: string;
 }
 
-interface EndpointHandle {
+interface EndpointHandle extends Endpoint {
   nodeId: NodeId;
-  name: string;
+}
+
+interface Node {
+  id: NodeId;
+  inputs: Endpoint[];
+  outputs: Endpoint[];
 }
 
 interface Edge {
@@ -19,102 +22,83 @@ interface Edge {
 }
 
 /**
- * 高性能增量 DAG（WeakMap 懒加载端点映射 + 最小调整增量拓扑）
+ * UltraDAG：端点驱动的高性能增量拓扑 DAG
+ * - WeakMap 端点连接索引（对象级懒加载）
+ * - 最小拓扑调整 reorder
  */
-class IndustrialDAG {
-  private nodes: Map<NodeId, Node> = new Map();
-  private edges: Map<EdgeId, Edge> = new Map();
+class UltraDAG {
+  private nodes = new Map<NodeId, Node>();
+  private edges = new Map<EdgeId, Edge>();
 
-  // 边集合（按 nodeId 存边 id）
-  private in: Map<NodeId, Set<EdgeId>> = new Map();
-  private out: Map<NodeId, Set<EdgeId>> = new Map();
+  private inEdges = new Map<NodeId, Set<Edge>>();
+  private outEdges = new Map<NodeId, Set<Edge>>();
+  private neighbors = new Map<NodeId, Set<NodeId>>();
+  private indegree = new Map<NodeId, number>();
 
-  // 直接邻居（出邻居 nodeId），避免每次通过 edges 查 target
-  private neighbors: Map<NodeId, Set<NodeId>> = new Map();
+  // 🔥 直接 WeakMap：端点对象 => 边集合
+  private endpointEdges = new WeakMap<Endpoint, Set<Edge>>();
 
-  // 入度（用于其他用途或检查）
-  private indegree: Map<NodeId, number> = new Map();
+  // 拓扑序
+  private topo: NodeId[] = [];
+  private rank = new Map<NodeId, number>();
 
-  // WeakMap 懒加载端点映射：nodeObject -> Map<portName, Set<EdgeId>>
-  private connections: WeakMap<Node, Map<string, Set<EdgeId>>> = new WeakMap();
-
-  // 拓扑序 + 位置缓存 (rank)
-  private topoOrder: NodeId[] = [];
-  private nodePosition: Map<NodeId, number> = new Map();
-
-  // -------------------- 节点操作 --------------------
+  // ------------------ 节点 ------------------
   addNode(node: Node) {
     if (this.nodes.has(node.id)) throw new Error(`Node ${node.id} exists`);
     this.nodes.set(node.id, node);
-
-    this.in.set(node.id, new Set());
-    this.out.set(node.id, new Set());
+    this.inEdges.set(node.id, new Set());
+    this.outEdges.set(node.id, new Set());
     this.neighbors.set(node.id, new Set());
     this.indegree.set(node.id, 0);
 
-    // 默认将新节点追加到 topoOrder 尾部（便于增量）
-    const pos = this.topoOrder.length;
-    this.topoOrder.push(node.id);
-    this.nodePosition.set(node.id, pos);
+    const pos = this.topo.length;
+    this.topo.push(node.id);
+    this.rank.set(node.id, pos);
   }
 
-  removeNode(nodeId: NodeId) {
-    const node = this.nodes.get(nodeId);
+  removeNode(id: NodeId) {
+    const node = this.nodes.get(id);
     if (!node) return false;
 
-    // 删除相关边（复制集合以免迭代时修改）
-    const inEdges = Array.from(this.in.get(nodeId) || []);
-    const outEdges = Array.from(this.out.get(nodeId) || []);
-    for (const eid of inEdges) this.removeEdge(eid);
-    for (const eid of outEdges) this.removeEdge(eid);
+    const allEdges = [...(this.inEdges.get(id) || []), ...(this.outEdges.get(id) || [])];
+    for (const e of allEdges) this.removeEdge(e.id);
 
-    // 删除 node 相关结构
-    this.nodes.delete(nodeId);
-    this.in.delete(nodeId);
-    this.out.delete(nodeId);
-    this.neighbors.delete(nodeId);
-    this.indegree.delete(nodeId);
+    this.nodes.delete(id);
+    this.inEdges.delete(id);
+    this.outEdges.delete(id);
+    this.neighbors.delete(id);
+    this.indegree.delete(id);
 
-    // 从 topoOrder 中移除并更新位置（一次线性更新）
-    const idx = this.nodePosition.get(nodeId);
+    const idx = this.rank.get(id);
     if (idx !== undefined) {
-      this.topoOrder.splice(idx, 1);
-      this.nodePosition.delete(nodeId);
-      for (let i = idx; i < this.topoOrder.length; i++) {
-        this.nodePosition.set(this.topoOrder[i], i);
+      this.topo.splice(idx, 1);
+      this.rank.delete(id);
+      for (let i = idx; i < this.topo.length; i++) {
+        this.rank.set(this.topo[i], i);
       }
     }
-
-    // WeakMap 的 entry 会在 node 对象不可达时被回收（无需手动删除）
     return true;
   }
 
-  // -------------------- 边操作 --------------------
+  // ------------------ 边 ------------------
   addEdge(edge: Edge) {
     if (this.edges.has(edge.id)) throw new Error(`Edge ${edge.id} exists`);
-    const srcNode = this.nodes.get(edge.source.nodeId);
-    const tgtNode = this.nodes.get(edge.target.nodeId);
-    if (!srcNode) throw new Error(`Source node ${edge.source.nodeId} not found`);
-    if (!tgtNode) throw new Error(`Target node ${edge.target.nodeId} not found`);
-    if (edge.source.nodeId === edge.target.nodeId) throw new Error('Self-loop not allowed');
+    const src = this.nodes.get(edge.source.nodeId);
+    const tgt = this.nodes.get(edge.target.nodeId);
+    if (!src || !tgt) throw new Error(`Invalid node reference`);
+    if (edge.source.nodeId === edge.target.nodeId) throw new Error(`Self-loop not allowed`);
 
     this.edges.set(edge.id, edge);
-
-    // 更新边集合
-    this.out.get(edge.source.nodeId)!.add(edge.id);
-    this.in.get(edge.target.nodeId)!.add(edge.id);
-
-    // 更新邻居集合（保持 nodeId set）
+    this.outEdges.get(edge.source.nodeId)!.add(edge);
+    this.inEdges.get(edge.target.nodeId)!.add(edge);
     this.neighbors.get(edge.source.nodeId)!.add(edge.target.nodeId);
-
-    // 更新入度
     this.indegree.set(edge.target.nodeId, (this.indegree.get(edge.target.nodeId) || 0) + 1);
 
-    // WeakMap 懒加载端点映射
-    this.addConnection(srcNode, edge.source.name, edge.id);
-    this.addConnection(tgtNode, edge.target.name, edge.id);
+    // 🔗 WeakMap：注册端点与边
+    this.linkEndpoint(edge.source, edge);
+    this.linkEndpoint(edge.target, edge);
 
-    // 增量调整拓扑（最小移动）
+    // 局部拓扑更新
     this.reorder(edge.source.nodeId, edge.target.nodeId);
   }
 
@@ -124,167 +108,100 @@ class IndustrialDAG {
 
     const src = edge.source.nodeId;
     const tgt = edge.target.nodeId;
-    const srcNode = this.nodes.get(src)!;
-    const tgtNode = this.nodes.get(tgt)!;
 
-    // 更新边集合
-    this.out.get(src)!.delete(edgeId);
-    this.in.get(tgt)!.delete(edgeId);
-
-    // 若 src->tgt 不再有任何边，移除 neighbors 关系
-    let stillConnected = false;
-    for (const eid of this.out.get(src)!) {
-      if (this.edges.get(eid)!.target.nodeId === tgt) {
-        stillConnected = true;
-        break;
-      }
-    }
-    if (!stillConnected) this.neighbors.get(src)!.delete(tgt);
-
-    // 更新入度
+    this.outEdges.get(src)?.delete(edge);
+    this.inEdges.get(tgt)?.delete(edge);
+    this.neighbors.get(src)?.delete(tgt);
     this.indegree.set(tgt, Math.max(0, (this.indegree.get(tgt) || 1) - 1));
 
-    // 更新 WeakMap connections
-    this.removeConnection(srcNode, edge.source.name, edgeId);
-    this.removeConnection(tgtNode, edge.target.name, edgeId);
+    // 🔗 WeakMap 自动更新
+    this.unlinkEndpoint(edge.source, edge);
+    this.unlinkEndpoint(edge.target, edge);
 
     this.edges.delete(edgeId);
     return true;
   }
 
-  // -------------------- WeakMap connections helpers --------------------
-  private addConnection(nodeObj: Node, portName: string, edgeId: EdgeId) {
-    let portMap = this.connections.get(nodeObj);
-    if (!portMap) {
-      portMap = new Map<string, Set<EdgeId>>();
-      this.connections.set(nodeObj, portMap);
-    }
-    let set = portMap.get(portName);
+  // ------------------ WeakMap helpers ------------------
+  private linkEndpoint(ep: Endpoint, edge: Edge) {
+    let set = this.endpointEdges.get(ep);
     if (!set) {
-      set = new Set<EdgeId>();
-      portMap.set(portName, set);
+      set = new Set();
+      this.endpointEdges.set(ep, set);
     }
-    set.add(edgeId);
+    set.add(edge);
   }
 
-  private removeConnection(nodeObj: Node, portName: string, edgeId: EdgeId) {
-    const portMap = this.connections.get(nodeObj);
-    if (!portMap) return;
-    const set = portMap.get(portName);
-    if (!set) return;
-    set.delete(edgeId);
-    if (set.size === 0) portMap.delete(portName);
-    // 若 portMap 为空，WeakMap 会随着 nodeObj 不可达自动回收
+  private unlinkEndpoint(ep: Endpoint, edge: Edge) {
+    const set = this.endpointEdges.get(ep);
+    if (set) {
+      set.delete(edge);
+      if (set.size === 0) this.endpointEdges.delete(ep);
+    }
   }
 
-  // -------------------- 最小调整增量拓扑（局部移动实现） --------------------
-  // 单词名字：reorder
+  // ------------------ 增量拓扑 ------------------
   private reorder(u: NodeId, v: NodeId) {
-    const rankU = this.nodePosition.get(u);
-    const rankV = this.nodePosition.get(v);
-    if (rankU === undefined || rankV === undefined) return;
-    if (rankU < rankV) return; // 已合法，无需调整
+    const ru = this.rank.get(u);
+    const rv = this.rank.get(v);
+    if (ru === undefined || rv === undefined) return;
+    if (ru < rv) return;
 
-    // BFS/队列 查找受影响节点：从 v 可达且当前 rank <= rankU 的节点
-    const visited = new Set<NodeId>();
     const affected: NodeId[] = [];
-    const q: NodeId[] = [v];
-    visited.add(v);
+    const q = [v];
+    const seen = new Set([v]);
 
     while (q.length) {
       const cur = q.shift()!;
       affected.push(cur);
-      const outs = this.neighbors.get(cur);
-      if (!outs) continue;
-      for (const nxt of outs) {
-        const r = this.nodePosition.get(nxt);
-        if (r !== undefined && r <= rankU && !visited.has(nxt)) {
-          visited.add(nxt);
+      for (const nxt of this.neighbors.get(cur) || []) {
+        const r = this.rank.get(nxt);
+        if (r !== undefined && r <= ru && !seen.has(nxt)) {
+          seen.add(nxt);
           q.push(nxt);
         }
       }
     }
+    if (!affected.length) return;
 
-    if (affected.length === 0) return;
+    const moved = new Set(affected);
+    const kept = this.topo.filter(n => !moved.has(n));
+    const idx = kept.indexOf(u) + 1;
+    kept.splice(idx, 0, ...affected);
 
-    // 为减少 work：affected 保持 BFS 发现顺序（通常已为拓扑可用顺序），不再全排序
-    const movedSet = new Set<NodeId>(affected);
-
-    // 在 topoOrder 中原地移除所有 affected 节点并插入到 u 后面
-    // 1) 构建未移动的序列（before），保留原顺序
-    const before: NodeId[] = [];
-    before.length = this.topoOrder.length - movedSet.size; // 预分配（提示）
-
-    // 填充 before（一次遍历）
-    let bi = 0;
-    for (let i = 0; i < this.topoOrder.length; i++) {
-      const nid = this.topoOrder[i];
-      if (!movedSet.has(nid)) {
-        before[bi++] = nid;
-      }
-    }
-    before.length = bi; // 修正长度
-
-    // 2) 找到插入位置（u 在 before 中的位置）
-    const insertIdx = before.indexOf(u) + 1; // indexOf 只有一次（受控成本）
-
-    // 3) 在 before 中插入 affected（保持 affected 的发现顺序）
-    // 直接 splice
-    before.splice(insertIdx, 0, ...affected);
-
-    // 4) 替换 topoOrder 并一次性更新 nodePosition
-    this.topoOrder = before;
-    for (let i = 0; i < this.topoOrder.length; i++) {
-      this.nodePosition.set(this.topoOrder[i], i);
-    }
+    this.topo = kept;
+    for (let i = 0; i < kept.length; i++) this.rank.set(kept[i], i);
   }
 
-  // -------------------- 查询 --------------------
-  getEdgesByEndpoint(endpoint: EndpointHandle, type: 'input' | 'output'): Edge[] {
-    const nodeObj = this.nodes.get(endpoint.nodeId);
-    if (!nodeObj) return [];
-    const portMap = this.connections.get(nodeObj);
-    if (!portMap) return [];
-    const set = portMap.get(endpoint.name);
-    if (!set) return [];
-    return Array.from(set).map(id => this.edges.get(id)!).filter(Boolean);
+  // ------------------ 查询 ------------------
+  getEdgesByEndpoint(ep: Endpoint): Edge[] {
+    return Array.from(this.endpointEdges.get(ep) || []);
   }
 
-  getNeighbors(nodeId: NodeId): NodeId[] {
-    return Array.from(this.neighbors.get(nodeId) || []);
+  getNeighbors(id: NodeId): NodeId[] {
+    return Array.from(this.neighbors.get(id) || []);
   }
 
-  getPredecessors(nodeId: NodeId): NodeId[] {
-    const inSet = this.in.get(nodeId) || new Set();
-    const preds: NodeId[] = [];
-    for (const eid of inSet) {
-      const e = this.edges.get(eid);
-      if (e) preds.push(e.source.nodeId);
-    }
-    return preds;
-  }
-
-  getInDegree(nodeId: NodeId): number {
-    return this.indegree.get(nodeId) || 0;
-  }
-
-  getOutDegree(nodeId: NodeId): number {
-    return this.out.get(nodeId)?.size || 0;
-  }
-
-  getTopoOrder(): NodeId[] {
-    return [...this.topoOrder];
-  }
-
-  clear() {
-    this.nodes.clear();
-    this.edges.clear();
-    this.in.clear();
-    this.out.clear();
-    this.neighbors.clear();
-    this.indegree.clear();
-    this.connections = new WeakMap();
-    this.topoOrder = [];
-    this.nodePosition.clear();
+  getTopo(): NodeId[] {
+    return [...this.topo];
   }
 }
+
+
+// 如果你要在高频动态调度（每秒几千次更新）下使用，可以再提升：
+
+// 批量模式
+
+// 累积多条边更新后再统一 reorderBatch()。
+
+// 避免每次边添加都触发局部排序。
+
+// 拓扑索引树（Topological Index Tree）
+
+// 使用平衡树维护 rank（比如 Order-Maintenance Tree）。
+
+// 在节点移动时 O(log n) 调整 rank，而不是 O(k) 扫描。
+
+// 延迟修正（Lazy Reorder）
+
+// 标记脏区间（dirty zone），只在真正需要时修正。
