@@ -199,7 +199,6 @@ export class PairingHeap<T> {
         const merged = this.collapse(node.child);
         if (merged) merged.prev = null;
 
-        // 把合并后的子树重新与根合并
         this.root = this.meld(this.root, merged);
         this._size--;
         return true
@@ -210,14 +209,11 @@ export class PairingHeap<T> {
         node.value = value;
 
         if (cmp < 0) {
-            // 新值更小 => 向上提升
             if (node !== this.root) {
                 this.detach(node);
                 this.root = this.meld(this.root, node);
             }
         } else if (cmp > 0) {
-            // 新值更大 => 可能要下降
-            // 简化实现：删除后重新插入
             this.delete(node);
             this.push(value);
         }
@@ -296,7 +292,6 @@ export class PairingHeap<T> {
             }
         }
 
-        // 逆向合并
         while (tail) {
             next = tail.prev;
             tail.prev = null;
