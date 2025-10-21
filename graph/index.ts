@@ -19,21 +19,44 @@ export interface Node {
 }
 
 export class Graph<N extends Node = Node, E extends Edge = Edge> {
-    public readonly nodes: Map<string, N> = new Map();
-    public readonly edges: Map<string, E> = new Map();
+    private nodes: Map<string, N> = new Map();
+    private edges: Map<string, E> = new Map();
+
+    private incoming: Map<string, Set<string>> = new Map();
+    private outgoing: Map<string, Set<string>> = new Map();
+
+    private links: WeakMap<N, Map<string, Set<string>>> = new WeakMap();
 
     private indegree: Map<string, number> = new Map();
 
+    private order: string[] = [];
+
+    private positions: Map<string, number> = new Map();
+
     public addNode(node: N) {
         this.nodes.set(node.id, node);
+
+        this.incoming.set(node.id, new Set());
+        this.outgoing.set(node.id, new Set());
+
         this.indegree.set(node.id, 0);
+
+        this.positions.set(node.id, this.order.length);
+        this.order.push(node.id);
     }
 
     public addEdge(edge: E) {
-        const { target } = edge;
+        const { source, target } = edge;
 
         this.edges.set(edge.id, edge);
+
+        this.incoming.get(target.nodeId)!.add(edge.id);
+        this.outgoing.get(source.nodeId)!.add(edge.id);
+
         this.indegree.set(target.nodeId, (this.indegree.get(target.nodeId) ?? 0) + 1);
+
+        this.link(this.nodes.get(source.nodeId)!, source.name, edge.id);
+        this.link(this.nodes.get(target.nodeId)!, target.name, edge.id);
     }
 
     public sort() {
@@ -63,4 +86,8 @@ export class Graph<N extends Node = Node, E extends Edge = Edge> {
     }
 
     public subgraph() { }
+
+    private link(node: N, name: string, edgeId: string) { }
+
+    private unlink() { }
 }
