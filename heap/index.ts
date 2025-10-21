@@ -302,14 +302,3 @@ export class PairingHeap<T> {
         return result;
     }
 }
-
-const heap = new PairingHeap<number>((a, b) => a - b);
-heap.push(5);
-heap.push(7);
-heap.push(6);
-heap.push(8);
-
-console.log(heap)
-
-heap.poll()
-console.log(heap)
