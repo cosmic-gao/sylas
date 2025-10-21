@@ -112,3 +112,19 @@ export class Graph<N extends Node = Node, E extends Edge = Edge> {
         for (let i = 0; i < kept.length; i++) this.rank.set(kept[i], i);
     }
 }
+
+
+const graph = new Graph();
+
+const A = { id: 'A', inputs: [], outputs: [{ name: 'out' }] };
+const B = { id: 'B', inputs: [{ name: 'in' }], outputs: [{ name: 'out' }] };
+const C = { id: 'C', inputs: [{ name: 'in' }], outputs: [{ name: 'out' }] };
+
+graph.addNode(A);
+graph.addNode(B);
+graph.addNode(C);
+
+graph.addEdge({ id: 'e1', source: { nodeId: 'A', name: 'out' }, target: { nodeId: 'C', name: 'in' } });
+graph.addEdge({ id: 'e2', source: { nodeId: 'C', name: 'out' }, target: { nodeId: 'B', name: 'in' } });
+
+console.log(graph)
