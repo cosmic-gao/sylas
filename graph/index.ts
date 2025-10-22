@@ -28,13 +28,13 @@ export class Graph<N extends Node = Node, E extends Edge = Edge> {
     private inEdges: Map<NodeId, Set<EdgeId>> = new Map();
     private outEdges: Map<NodeId, Set<EdgeId>> = new Map();
 
-    private endpointEdges: WeakMap<Endpoint, Set<Edge>> = new WeakMap();
+    private endpointEdges: WeakMap<Endpoint, Set<EdgeId>> = new WeakMap();
 
     private neighbors: Map<NodeId, Set<NodeId>> = new Map();
 
     private indegree: Map<NodeId, number> = new Map();
 
-    private order: NodeId[] = [];
+    private topo: NodeId[] = [];
 
     private rank: Map<NodeId, number> = new Map();
 
@@ -48,11 +48,10 @@ export class Graph<N extends Node = Node, E extends Edge = Edge> {
 
         this.indegree.set(node.id, 0);
 
-        this.rank.set(node.id, this.order.length);
-        this.order.push(node.id);
+        this.rank.set(node.id, this.topo.length);
+        this.topo.push(node.id);
     }
 
-    //
     public addEdge(edge: E) {
         const { source, target } = edge;
 
@@ -65,19 +64,19 @@ export class Graph<N extends Node = Node, E extends Edge = Edge> {
 
         this.indegree.set(target.nodeId, (this.indegree.get(target.nodeId) ?? 0) + 1);
 
-        this.linkEndpoint(source, edge);
-        this.linkEndpoint(target, edge);
+        this.linkEndpoint(source, edge.id);
+        this.linkEndpoint(target, edge.id);
 
         this.reorder(source.nodeId, target.nodeId);
     }
 
-    private linkEndpoint(endpoint: Endpoint, edge: Edge) {
+    private linkEndpoint(endpoint: Endpoint, edgeId: EdgeId) {
         let set = this.endpointEdges.get(endpoint);
         if (!set) {
             set = new Set();
             this.endpointEdges.set(endpoint, set);
         }
-        set.add(edge);
+        set.add(edgeId);
     }
 
     private reorder(srcId: NodeId, tgtId: NodeId) {
@@ -105,11 +104,16 @@ export class Graph<N extends Node = Node, E extends Edge = Edge> {
         if (!affected.length) return;
 
         const moved = new Set(affected);
-        const kept = this.order.filter(n => !moved.has(n));
-        const idx = kept.indexOf(srcId) + 1;
-        kept.splice(idx, 0, ...affected);
+        const kept: NodeId[] = [];
+        for (const n of this.topo) {
+            if (!moved.has(n)) kept.push(n);
+        }
 
-        this.order = kept;
+        const index = kept.indexOf(srcId);
+        const start = index >= 0 ? index + 1 : kept.length;
+        kept.splice(start, 0, ...affected);
+
+        this.topo = kept;
         for (let i = 0; i < kept.length; i++) this.rank.set(kept[i], i);
     }
 }
