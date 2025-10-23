@@ -35,7 +35,6 @@ export class Graph<N extends Node = Node, E extends Edge = Edge> {
     private indegree: Map<NodeId, number> = new Map();
 
     private topo: NodeId[] = [];
-
     private rank: Map<NodeId, number> = new Map();
 
     public addNode(node: N) {
