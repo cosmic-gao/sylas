@@ -31,7 +31,6 @@ export class Graph<N extends Node = Node, E extends Edge = Edge> {
     private endpointEdges: WeakMap<Endpoint, Set<EdgeId>> = new WeakMap();
 
     private neighbors: Map<NodeId, Set<NodeId>> = new Map();
-
     private indegree: Map<NodeId, number> = new Map();
 
     private topo: NodeId[] = [];
@@ -44,7 +43,6 @@ export class Graph<N extends Node = Node, E extends Edge = Edge> {
         this.outEdges.set(node.id, new Set());
 
         this.neighbors.set(node.id, new Set());
-
         this.indegree.set(node.id, 0);
 
         this.rank.set(node.id, this.topo.length);
@@ -60,7 +58,6 @@ export class Graph<N extends Node = Node, E extends Edge = Edge> {
         this.outEdges.get(source.nodeId)!.add(edge.id);
 
         this.neighbors.get(edge.source.nodeId)!.add(edge.target.nodeId);
-
         this.indegree.set(target.nodeId, (this.indegree.get(target.nodeId) ?? 0) + 1);
 
         this.linkEndpoint(source, edge.id);
@@ -84,23 +81,22 @@ export class Graph<N extends Node = Node, E extends Edge = Edge> {
         if (srcRank === undefined || tgtRank === undefined) return;
         if (srcRank < tgtRank) return;
 
-        const affected: NodeId[] = [];
+        const affected = new Set<NodeId>();
         const queue: NodeId[] = [tgtId];
-        const seen = new Set([tgtId]);
 
         while (queue.length) {
-            const nodeId = queue.shift()!;
-            affected.push(nodeId)
-            for (const nxt of this.neighbors.get(nodeId) || []) {
-                const r = this.rank.get(nxt);
-                if (r !== undefined && r <= srcRank && !seen.has(nxt)) {
-                    seen.add(nxt);
-                    queue.push(nxt);
-                }
+            const node = queue.shift()!;
+            if (affected.has(node)) continue;
+            const r = this.rank.get(node)!;
+            if (r < tgtRank) continue;
+            affected.add(node);
+
+            for (const neighbor of this.neighbors.get(node)!) {
+                queue.push(neighbor);
             }
         }
 
-        if (!affected.length) return;
+        if (!affected.size) return;
 
         const moved = new Set(affected);
         const kept: NodeId[] = [];
