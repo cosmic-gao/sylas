@@ -28,8 +28,6 @@ export class Graph<N extends Node = Node, E extends Edge = Edge> {
     private inEdges: Map<NodeId, Set<EdgeId>> = new Map();
     private outEdges: Map<NodeId, Set<EdgeId>> = new Map();
 
-    private endpointEdges: Map<string, Set<EdgeId>> = new Map();
-
     private neighbors: Map<NodeId, Set<NodeId>> = new Map();
     private indegree: Map<NodeId, number> = new Map();
 
@@ -47,6 +45,7 @@ export class Graph<N extends Node = Node, E extends Edge = Edge> {
 
         this.rank.set(node.id, this.topo.length);
         this.topo.push(node.id);
+        return this
     }
 
     public addEdge(edge: E) {
@@ -60,21 +59,10 @@ export class Graph<N extends Node = Node, E extends Edge = Edge> {
         this.neighbors.get(edge.source.nodeId)!.add(edge.target.nodeId);
         this.indegree.set(target.nodeId, (this.indegree.get(target.nodeId) ?? 0) + 1);
 
-        this.linkEndpoint(source, edge.id);
-        this.linkEndpoint(target, edge.id);
-
         this.reorder(source.nodeId, target.nodeId);
+        return this
     }
 
-    private linkEndpoint(endpoint: EndpointHandle, edgeId: EdgeId) {
-        const key = this.endpointKey(endpoint);
-        let set = this.endpointEdges.get(key);
-        if (!set) {
-            set = new Set();
-            this.endpointEdges.set(key, set);
-        }
-        set.add(edgeId);
-    }
 
     private reorder(srcId: NodeId, tgtId: NodeId) {
         const srcRank = this.rank.get(srcId);
@@ -82,23 +70,21 @@ export class Graph<N extends Node = Node, E extends Edge = Edge> {
         if (srcRank === undefined || tgtRank === undefined) return;
         if (srcRank < tgtRank) return;
 
-        const affected = new Set<NodeId>();
-        const queue: NodeId[] = [tgtId];
+        const visited = new Set<NodeId>();
+        const queue = [tgtId];
+        const affected: NodeId[] = [];
 
         while (queue.length) {
-            const node = queue.shift()!;
-            if (affected.has(node)) continue;
-
-            affected.add(node);
-
-            for (const neighbor of this.neighbors.get(node)!) {
-                queue.push(neighbor);
+            const node = queue.pop()!;
+            if (visited.has(node)) continue;
+            visited.add(node);
+            affected.push(node);
+            for (const n of this.neighbors.get(node) ?? []) {
+                if (!visited.has(n)) queue.push(n);
             }
         }
 
-        if (!affected.size) return;
-
-        const moved = new Set(affected);
+        const moved = new Set(visited);
         const kept: NodeId[] = [];
         for (const n of this.topo) {
             if (!moved.has(n)) kept.push(n);
@@ -111,8 +97,38 @@ export class Graph<N extends Node = Node, E extends Edge = Edge> {
         this.topo = kept;
         for (let i = 0; i < kept.length; i++) this.rank.set(kept[i], i);
     }
-
-    private endpointKey(endpoint: EndpointHandle) {
-        return `${endpoint.nodeId}.${endpoint.name}`;
-    }
 }
+
+const A = { id: 'A', inputs: [], outputs: [{ name: 'a-out1' }, { name: 'a-out2' }] }
+const B = { id: 'B', inputs: [{ name: 'b-in1' }], outputs: [{ name: 'b-out1' }, { name: 'b-out1' }] }
+const C = { id: 'C', inputs: [{ name: 'c-in1' }], outputs: [{ name: 'c-out1' }, { name: 'c-out2' }] }
+const D = { id: 'D', inputs: [{ name: 'd-in1' }], outputs: [{ name: 'd-out1' }, { name: 'd-out2' }] }
+const E = { id: 'E', inputs: [{ name: 'e-in1' }, { name: 'e-in2' }], outputs: [{ name: 'e-out1' }, { name: 'e-out2' }] }
+const F = { id: 'F', inputs: [{ name: 'f-in1' }], outputs: [{ name: 'f-out1' }, { name: 'f-out2' }] }
+
+const AB = { id: 'AB', source: { nodeId: 'A', name: "a-out1" }, target: { nodeId: 'B', name: 'b-in1' } }
+const AC = { id: 'AC', source: { nodeId: 'A', name: "a-out1" }, target: { nodeId: 'C', name: 'c-in1' } }
+const AE = { id: 'AE', source: { nodeId: 'A', name: "a-out2" }, target: { nodeId: 'E', name: 'e-in1' } }
+const BD = { id: 'BD', source: { nodeId: 'B', name: "b-out1" }, target: { nodeId: 'D', name: 'd-in1' } }
+const DF = { id: 'DF', source: { nodeId: 'D', name: "d-out1" }, target: { nodeId: 'F', name: 'f-in1' } }
+const EF = { id: 'EF', source: { nodeId: 'E', name: "e-out1" }, target: { nodeId: 'F', name: 'f-in2' } }
+const ED = { id: 'ED', source: { nodeId: 'E', name: "e-out2" }, target: { nodeId: 'D', name: 'd-in2' } }
+
+const graph = new Graph()
+
+graph
+    .addNode(A)
+    .addNode(B)
+    .addNode(C)
+    .addNode(D)
+    .addNode(E)
+    .addNode(F)
+    .addEdge(AB)
+    .addEdge(AC)
+    .addEdge(AE)
+    .addEdge(BD)
+    .addEdge(DF)
+    .addEdge(EF)
+    .addEdge(ED)
+
+console.log(graph)
