@@ -28,7 +28,7 @@ export class Graph<N extends Node = Node, E extends Edge = Edge> {
     private inEdges: Map<NodeId, Set<EdgeId>> = new Map();
     private outEdges: Map<NodeId, Set<EdgeId>> = new Map();
 
-    private endpointEdges: WeakMap<Endpoint, Set<EdgeId>> = new WeakMap();
+    private endpointEdges: Map<string, Set<EdgeId>> = new Map();
 
     private neighbors: Map<NodeId, Set<NodeId>> = new Map();
     private indegree: Map<NodeId, number> = new Map();
@@ -66,11 +66,12 @@ export class Graph<N extends Node = Node, E extends Edge = Edge> {
         this.reorder(source.nodeId, target.nodeId);
     }
 
-    private linkEndpoint(endpoint: Endpoint, edgeId: EdgeId) {
-        let set = this.endpointEdges.get(endpoint);
+    private linkEndpoint(endpoint: EndpointHandle, edgeId: EdgeId) {
+        const key = this.endpointKey(endpoint);
+        let set = this.endpointEdges.get(key);
         if (!set) {
             set = new Set();
-            this.endpointEdges.set(endpoint, set);
+            this.endpointEdges.set(key, set);
         }
         set.add(edgeId);
     }
@@ -109,5 +110,9 @@ export class Graph<N extends Node = Node, E extends Edge = Edge> {
 
         this.topo = kept;
         for (let i = 0; i < kept.length; i++) this.rank.set(kept[i], i);
+    }
+
+    private endpointKey(endpoint: EndpointHandle) {
+        return `${endpoint.nodeId}.${endpoint.name}`;
     }
 }
